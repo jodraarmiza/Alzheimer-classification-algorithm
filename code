@@ -1,0 +1,116 @@
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import tensorflow as tf
+from tensorflow import keras
+import os
+
+# Constants
+BATCH_SIZE = 64
+IMAGE_SIZE = (256, 256)
+dataset_files = '/content/Dataset'
+
+# Load dataset
+dataset = tf.keras.preprocessing.image_dataset_from_directory(
+    directory=dataset_files,
+    batch_size=BATCH_SIZE,
+    image_size=IMAGE_SIZE
+)
+class_names = dataset.class_names
+
+# Visualize sample images
+plt.figure(figsize=(10,10))
+for images, labels in dataset.take(1):
+    for i in range(9):
+        ax = plt.subplot(3, 3, i + 1)
+        plt.imshow(images[i].numpy().astype('uint8'))
+        plt.title(class_names[labels[i]])
+        plt.axis("off")
+
+# Split dataset
+def get_dataset_partitions_tf(ds, train_split=0.8, val_split=0.1, test_split=0.1, shuffle=True, shuffle_size=10000):
+    assert (train_split + val_split + test_split) == 1
+    ds_size = len(ds)
+    if shuffle:
+        ds = ds.shuffle(shuffle_size, seed=12)
+    train_size = int(train_split * ds_size)
+    val_size = int(val_split * ds_size)
+    train_ds = ds.take(train_size)
+    val_ds = ds.skip(train_size).take(val_size)
+    test_ds = ds.skip(train_size).skip(val_size)
+    return train_ds, val_ds, test_ds
+
+train_ds, val_ds, test_ds = get_dataset_partitions_tf(dataset)
+print(f"Train size: {len(train_ds)} \nVal size: {len(val_ds)} \nTest size: {len(test_ds)}")
+
+# Build the model
+num_classes = 4
+model = tf.keras.Sequential([
+    tf.keras.layers.Rescaling(1./255, input_shape=(256, 256, 3)),
+    tf.keras.layers.Conv2D(32, 3, activation='relu'),
+    tf.keras.layers.MaxPooling2D(),
+    tf.keras.layers.Conv2D(32, 3, activation='relu'),
+    tf.keras.layers.MaxPooling2D(),
+    tf.keras.layers.Conv2D(32, 3, activation='relu'),
+    tf.keras.layers.MaxPooling2D(),
+    tf.keras.layers.Flatten(),
+    tf.keras.layers.Dense(128, activation='relu'),
+    tf.keras.layers.Dense(num_classes, activation=None)
+])
+
+model.compile(
+  optimizer='adam',
+  loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
+  metrics=['accuracy']
+)
+
+model.summary()
+
+# Train the model
+history = model.fit(
+    train_ds,
+    validation_data=val_ds,
+    epochs=10,
+    verbose=1
+)
+
+# Visualize training results
+acc = history.history['accuracy']
+val_acc = history.history['val_accuracy']
+EPOCHS = 10
+loss = history.history['loss']
+val_loss = history.history['val_loss']
+
+plt.figure(figsize=(8, 8))
+plt.subplot(1, 2, 1)
+plt.plot(range(EPOCHS), acc, label='Training Accuracy')
+plt.plot(range(EPOCHS), val_acc, label='Validation Accuracy')
+plt.legend(loc='lower right')
+plt.title('Training and Validation Accuracy')
+
+plt.subplot(1, 2, 2)
+plt.plot(range(EPOCHS), loss, label='Training Loss')
+plt.plot(range(EPOCHS), val_loss, label='Validation Loss')
+plt.legend(loc='upper right')
+plt.title('Training and Validation Loss')
+plt.show()
+
+# Prediction function
+def predict_mri(model, img):
+    img_array = tf.keras.preprocessing.image.img_to_array(img)
+    img_array = tf.expand_dims(img_array, 0)
+    predictions = model.predict(img_array)
+    predicted_class = class_names[np.argmax(predictions[0])]
+    confidence = round(100 * (np.max(predictions[0])), 2)
+    return predicted_class, confidence
+
+# Visualize predictions
+plt.figure(figsize=(15, 15))
+for images, labels in test_ds.take(1):
+    for i in range(9):
+        ax = plt.subplot(3, 3, i + 1)
+        plt.imshow(images[i].numpy().astype("uint8"))
+        predicted_class, confidence = predict_mri(model, images[i])
+        actual_class = class_names[labels[i]]
+        plt.title(f"Actual: {actual_class},\n Predicted: {predicted_class}.\n")
+        plt.axis("off")
